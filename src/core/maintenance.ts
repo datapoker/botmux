@@ -538,6 +538,7 @@ export function spawnDetachedRestart(
   activePackageRoot?: string,
   restartLeaseId?: string,
   updatedBinary?: string,
+  extraRestartArgs: readonly string[] = [],
 ): ReturnType<typeof spawn> {
   const logFile = maintenanceRestartLogPath();
   let fd: number | undefined;
@@ -569,7 +570,7 @@ export function spawnDetachedRestart(
     updatedBinary,
   );
   const { cmd, args } = buildRestartLauncher(executable, cliEntry, setsidAvailable(), selfDispatching);
-  const child = spawn(cmd, args, {
+  const child = spawn(cmd, [...args, ...extraRestartArgs], {
     detached: true,
     stdio: fd !== undefined ? ['ignore', fd, fd] : 'ignore',
     env: {

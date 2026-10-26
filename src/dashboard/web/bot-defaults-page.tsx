@@ -70,6 +70,7 @@ import {
 } from './mode-diagrams.js';
 import { store } from './store.js';
 import { toast } from './toast.js';
+import { confirm } from './confirm-modal.js';
 import { sendJson, type DashboardJsonResponse } from './dashboard-api.js';
 import { cliAvailabilityStatus, cliAvailabilityRevision, useCliAvailability } from './cli-availability.js';
 import { caughtErrorText, responseErrorText, saveBotField, type StatusMessage } from './bot-defaults-save.js';
@@ -740,6 +741,7 @@ export function BotDefaultsPage() {
   const [profileRoleVersion, setProfileRoleVersion] = useState(0);
   const [, setAvatarVersion] = useState(0);
   const [onboardingBusy, setOnboardingBusy] = useState(false);
+  const [removingAppId, setRemovingAppId] = useState<string | null>(null);
   // `#/bot-defaults?tab=<分类>&section=<区块>&field=<配置项>`（⌘K 全局搜索）：落在该分类 / 区块 /
   // 配置项并定位过去；显式指定的分类优先于「启动被拦的 Bot 自动切到高级」那条首次自动选择逻辑。
   // 消费一次后清掉参数。
@@ -846,6 +848,40 @@ export function BotDefaultsPage() {
     }
   };
 
+  const removeSelectedBot = async () => {
+    if (!selectedBot || removingAppId) return;
+    const bot = selectedBot;
+    const approved = await confirm({
+      title: tr('botDefaults.delete'),
+      message: tr('botDefaults.deleteConfirm', { name: bot.botName ?? bot.larkAppId, appId: bot.larkAppId }),
+      danger: true,
+      confirmLabel: tr('botDefaults.delete'),
+    });
+    if (!approved || !mountedRef.current) return;
+    setRemovingAppId(bot.larkAppId);
+    try {
+      const result = await sendJson('POST', `/api/bots/${encodeURIComponent(bot.larkAppId)}/delete`, { confirmAppId: bot.larkAppId });
+      if (!result.ok) throw new Error(responseErrorText(result));
+      // A 202 only means the restart driver started. Confirm the persisted
+      // roster after reconnection before showing a successful deletion.
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await new Promise(resolve => window.setTimeout(resolve, 1500));
+        if (!mountedRef.current) return;
+        const snapshot = await fetchBotDefaults();
+        if (!snapshot.error && !snapshot.bots.some(row => row.larkAppId === bot.larkAppId)) {
+          await refresh();
+          toast(tr('botDefaults.deleteDone'), { kind: 'success' });
+          return;
+        }
+      }
+      throw new Error(tr('botDefaults.deleteUnconfirmed'));
+    } catch (error) {
+      if (mountedRef.current) toast(caughtErrorText(error), { kind: 'error' });
+    } finally {
+      if (mountedRef.current) setRemovingAppId(null);
+    }
+  };
+
   let detail: ReactNode;
   if (loading) {
     detail = <LoadingState label={tr('common.loading')} />;
@@ -885,12 +921,19 @@ export function BotDefaultsPage() {
           <h1>{tr('botDefaults.title')}</h1>
         </div>
         <div className="page-heading-actions">
+          {ui.authed && selectedBot ? (
+            <button type="button" className="danger" data-delete-bot
+              disabled={!!removingAppId || onboardingBusy}
+              onClick={() => void removeSelectedBot()}>
+              {tr(removingAppId ? 'botDefaults.deleting' : 'botDefaults.delete')}
+            </button>
+          ) : null}
           <RefreshIconButton id="bd-refresh" label={tr('botDefaults.refresh')} busy={refreshing} disabled={refreshing} onClick={() => void reload()} />
           {ui.authed && bots.length > 0 ? (
             <DropdownMenu<string>
               className="clone-bot-menu"
               ariaLabel={tr('botOnboarding.clone')}
-              disabled={onboardingBusy}
+              disabled={onboardingBusy || !!removingAppId}
               label={tr('botOnboarding.clone')}
               value=""
               options={bots.map(bot => ({
@@ -912,7 +955,7 @@ export function BotDefaultsPage() {
           {ui.authed ? (
             <CreateActionButton
               className="page-primary-action add-bot-btn"
-              disabled={onboardingBusy}
+              disabled={onboardingBusy || !!removingAppId}
               onClick={() => {
                 setOnboardingBusy(true);
                 void openBotOnboarding().finally(() => setOnboardingBusy(false));

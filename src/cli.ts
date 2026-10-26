@@ -2974,6 +2974,8 @@ async function cmdStop(): Promise<void> {
 
 async function cmdRestart(): Promise<void> {
   applyCompanionOptions(process.argv.slice(3));
+  const removalFlag = process.argv.indexOf('--remove-bot');
+  const removalIds = removalFlag < 0 ? [] : (process.argv[removalFlag + 1] ?? '').split(',');
   const { refreshPersistedEnv, readFailureFallback } = prepareRestartDriverContext();
   if (!hasConfig()) {
     console.error('❌ 未找到配置文件');
@@ -3002,6 +3004,18 @@ async function cmdRestart(): Promise<void> {
 
     await withFileLock(BOTS_JSON_FILE, async () => {
       const restartBots = loadBotsJson();
+      if (removalIds.length) {
+        const { removeBotsBeforeRestart } = await import('./services/bot-removal.js');
+        const { stopFleet, startFleetViaSupervisor } = await import('./core/fleet-runtime.js');
+        const backup = await removeBotsBeforeRestart(BOTS_JSON_FILE, restartBots, removalIds, {
+          stop: () => {
+            const result = stopFleet(FLEET_DAEMON_EXIT_WAIT_MS);
+            if (result.action === 'timeout') throw new Error('bot_removal_stop_timeout');
+          },
+          recover: () => { startFleetViaSupervisor({ refreshPersistedEnv, readFailureFallback }); },
+        });
+        console.log(`已删除 ${removalIds.length} 个机器人；配置备份：${backup}`);
+      }
       // Recompute the skip set source against the locked config generation;
       // resolveFleetMembers applies the same projection in the new supervisor.
       preflightQuotaFallbackTopology(restartBots, 'restart', false);
