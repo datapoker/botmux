@@ -807,7 +807,7 @@ describe('globalInstallUpdateCwd', () => {
 describe('spawnDetachedRestart', () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it('passes the restart lease to the actual detached CLI driver', async () => {
+  it.each([[], ['--remove-bot', 'cli_target']])('passes the lease and removal arguments to the detached driver: %j', async (...extraRestartArgs) => {
     const dir = mkdtempSync(join(tmpdir(), 'botmux-restart-driver-'));
     const packageRoot = join(dir, 'package');
     const output = join(dir, 'driver.json');
@@ -827,7 +827,7 @@ describe('spawnDetachedRestart', () => {
     vi.stubEnv('SESSION_DATA_DIR', dataDir);
 
     try {
-      const child = spawnDetachedRestart('test', packageRoot, 'lease-123');
+      const child = spawnDetachedRestart('test', packageRoot, 'lease-123', undefined, extraRestartArgs);
       expect(child.pid).toEqual(expect.any(Number));
       for (let i = 0; i < 50 && !existsSync(output); i++) {
         await new Promise(resolve => setTimeout(resolve, 20));
@@ -835,7 +835,7 @@ describe('spawnDetachedRestart', () => {
       expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual({
         id: 'lease-123',
         dir: dataDir,
-        args: ['restart'],
+        args: ['restart', ...extraRestartArgs],
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

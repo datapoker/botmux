@@ -128,6 +128,7 @@ import { resolveLiveBotTransport } from './services/team-roster.js';
 import { handleFederationSpokeApi, syncAllMemberships, autoBindOwnerIfUnambiguous, type TeamSessionRowLike } from './dashboard/federation-spoke-api.js';
 import type { TeamGroupCreateResult, TeamGroupOwnerTransferResult } from './dashboard/federated-group-core.js';
 import { BotOnboardingManager } from './dashboard/bot-onboarding.js';
+import { handleBotRemovalApi } from './dashboard/bot-removal-api.js';
 import { FeishuLoginManager } from './dashboard/feishu-login.js';
 import {
   createDashboardH5AuthController,
@@ -5817,6 +5818,16 @@ const server = createServer(async (req, res) => {
     })) {
       return;
     }
+
+    if (await handleBotRemovalApi(req, res, url, {
+      canManageHost: authed,
+      configPath: requireConfigPath,
+      readJsonBody,
+      launch: appId => {
+        const child = spawnDetachedRestart('dashboard-remove-bot', undefined, undefined, undefined, ['--remove-bot', appId]);
+        if (!child.pid) throw new Error('bot_removal_launch_failed');
+      },
+    })) return;
 
     // ─── Agent 配置模板（agents.json）─────────────────────────────────────────
     // 不在 PUBLIC_READ_PATHS ⟹ 未认证已被 401；写操作在 handler 内另要 canManageHost。
